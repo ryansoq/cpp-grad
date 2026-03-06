@@ -18,6 +18,9 @@
 #include <cmath>
 #include <iostream>
 #include <algorithm>
+#include <sstream>
+#include <fstream>
+#include <iomanip>
 
 class Value : public std::enable_shared_from_this<Value> {
 public:
@@ -32,7 +35,7 @@ private:
     std::string op_;                     // 運算標籤（debug 用）
 
     // 私有建構子 — 強制使用 create() 工廠函數
-    explicit Value(double data) : data(data), grad(0.0) {}
+    explicit Value(double data) : data(data), grad(0.0), label_("") {}
 
 public:
     // ===== 工廠函數 =====
@@ -231,4 +234,85 @@ public:
         os << "Value(data=" << v.data << ", grad=" << v.grad << ")";
         return os;
     }
+
+    // ===== Graphviz 視覺化 =====
+
+    /// 設定節點標籤（方便看圖）
+    Ptr label(const std::string& name) {
+        label_ = name;
+        return shared_from_this();
+    }
+
+    /// 產生 DOT 格式的計算圖
+    /// 用法：
+    ///   auto dot = loss->to_dot();
+    ///   std::ofstream("graph.dot") << dot;
+    ///   // 然後執行: dot -Tpng graph.dot -o graph.png
+    std::string to_dot() const {
+        std::ostringstream dot;
+        dot << "digraph {\n";
+        dot << "  rankdir=LR;\n";
+        dot << "  node [shape=record];\n\n";
+
+        std::unordered_set<const Value*> visited;
+        std::function<void(const Value*)> trace = [&](const Value* v) {
+            if (visited.count(v)) return;
+            visited.insert(v);
+
+            auto uid = reinterpret_cast<uintptr_t>(v);
+
+            // 資料節點：顯示 label | data | grad
+            dot << "  \"" << uid << "\" [label=\"{";
+            if (!v->label_.empty()) dot << v->label_ << " | ";
+            dot << std::fixed << std::setprecision(4);
+            dot << "data " << v->data << " | grad " << v->grad;
+            dot << "}\"];\n";
+
+            // 如果有 op，畫一個 op 節點
+            if (!v->op_.empty()) {
+                auto op_uid = std::to_string(uid) + "_op";
+                dot << "  \"" << op_uid << "\" [label=\"" << v->op_ << "\", shape=circle];\n";
+                dot << "  \"" << op_uid << "\" -> \"" << uid << "\";\n";
+
+                // 上游節點 → op 節點
+                for (auto& child : v->prev_) {
+                    auto child_uid = reinterpret_cast<uintptr_t>(child.get());
+                    dot << "  \"" << child_uid << "\" -> \"" << op_uid << "\";\n";
+                    trace(child.get());
+                }
+            }
+        };
+
+        trace(this);
+        dot << "}\n";
+        return dot.str();
+    }
+
+    /// 直接輸出 DOT 到檔案並嘗試用 graphviz 產生圖片
+    void draw_dot(const std::string& filename = "graph") const {
+        auto dot = to_dot();
+
+        // 寫 .dot 檔
+        std::ofstream dotfile(filename + ".dot");
+        dotfile << dot;
+        dotfile.close();
+
+        // 嘗試產生 PNG（需要安裝 graphviz）
+        std::string cmd = "dot -Tpng " + filename + ".dot -o " + filename + ".png 2>/dev/null";
+        if (system(cmd.c_str()) == 0) {
+            std::cout << "📊 Graph saved: " << filename << ".png" << std::endl;
+        } else {
+            std::cout << "📊 DOT saved: " << filename << ".dot" << std::endl;
+            std::cout << "   Run: dot -Tpng " << filename << ".dot -o " << filename << ".png" << std::endl;
+        }
+
+        // 也產生 SVG
+        cmd = "dot -Tsvg " + filename + ".dot -o " + filename + ".svg 2>/dev/null";
+        if (system(cmd.c_str()) == 0) {
+            std::cout << "📊 SVG saved: " << filename << ".svg" << std::endl;
+        }
+    }
+
+private:
+    std::string label_;  // 節點標籤（給人看的）
 };

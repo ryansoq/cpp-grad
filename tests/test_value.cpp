@@ -266,6 +266,21 @@ TEST(micrograd_example) {
     ASSERT_NEAR(b->grad, 645.5773, 1e-3);
 }
 
+// ===== T19: Graphviz =====
+
+TEST(to_dot) {
+    auto a = Value::create(2.0)->label("a");
+    auto b = Value::create(3.0)->label("b");
+    auto c = (a * b)->label("c");
+    c->backward();
+    auto dot = c->to_dot();
+    // 檢查 DOT 格式的基本結構
+    assert(dot.find("digraph") != std::string::npos);
+    assert(dot.find("*") != std::string::npos);
+    assert(dot.find("a") != std::string::npos);
+    assert(dot.find("b") != std::string::npos);
+}
+
 // ===== Main =====
 
 int main() {
